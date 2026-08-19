@@ -1,96 +1,68 @@
-# Agent Reliability Lab — Evaluation
+# Agent Reliability Lab - Evaluation
 
-## Final Evaluation Status
+## Scope
 
-The modeling and evaluation milestone is complete.
+The completed result covers the existing 110-trace corpus:
 
-### Dataset
+| Split | Traces |
+| --- | ---: |
+| Train | 77 |
+| Validation | 16 |
+| Held-out test | 17 |
+| Total | 110 |
 
-- Total traces: 110
-- Failure categories: 9
-- Train: 77
-- Validation: 16
-- Test: 17
+The test membership is stored in `data/splits/test.csv`. The V8 evaluation script selects those trace IDs from `data/processed/behavior_features_v3.csv`; it does not create a new test set.
 
-## V7 Machine Learning Model
+## Model Versions
 
-The V7 behavioral classifier combines:
+V7 is the statistical model used by the final evaluation. It combines:
 
-- TF-IDF text features
-- agent type
-- tool usage
-- step count
-- evidence presence
-- answer presence
-- contradiction detection
-- reasoning-error signals
-- expected-tool behavior
-- repeated tool/search behavior
-- task completion signals
-- formatting signals
-- malformed JSON/XML signals
-- safety signals
+- TF-IDF features from agent type, task, steps, and evidence text
+- Structured behavior features for tool use, evidence, completion, contradictions, formatting, safety, and reasoning
+- A logistic-regression classifier with balanced class weights
 
-V7 test performance:
+V8 adds a deterministic layer after the V7 prediction. In priority order, explicit signals override the model with:
 
-**Accuracy: 94.12%**
+1. `has_reasoning_error_signal` -> `bad_reasoning`
+2. `has_malformed_json` or `has_malformed_xml` -> `malformed_output`
+3. `has_safety_signal` -> `safety_violation`
+4. `has_missing_requirement` -> `incomplete_task`
 
-## V8 Hybrid Reliability System
+The implementation is in `scripts/model/evaluate_v8.py`. The persisted statistical artifact is `data/processed/reliability_classifier_v7.joblib`.
 
-V8 combines the trained ML classifier with deterministic reliability rules.
+## Results
 
-Explicit rules handle high-confidence behavioral signals:
-
-1. Reasoning-error signal → `bad_reasoning`
-2. Malformed JSON/XML → `malformed_output`
-3. Safety signal → `safety_violation`
-4. Missing requirement → `incomplete_task`
-
-### Held-Out Test Result
-
-| Metric | Result |
-|---|---:|
-| Test examples | 17 |
-| Correct | 17 |
+| Metric | V8 result |
+| --- | ---: |
+| Held-out examples | 17 |
+| Correct predictions | 17 |
 | Errors | 0 |
 | Accuracy | 100% |
 
-The V8 system correctly classified every example in the held-out test set.
+The generated row-level report is `reports/v8_error_analysis.csv`. It includes the actual label, the V7 prediction, the final V8 prediction, and whether a rule changed the prediction.
 
-## Important Evaluation Limitation
+## Why V8 Was Added
 
-A separate generalization evaluation was attempted.
+During error analysis, `trace_055` was labeled `bad_reasoning`, while the statistical model predicted `none`. The trace had an explicit reasoning-error signal. The V8 rule converted that prediction to `bad_reasoning`, making the observable condition decisive.
 
-The repository currently contains only the original 110 traces. Therefore, no genuinely unseen traces were available for an independent generalization test.
+This is the reason for the hybrid design: statistical features support general pattern recognition, while explicit rules make critical, directly detected conditions auditable.
 
-The project intentionally does **not** report the existing test set as a generalization result.
+## Caveat
 
-This distinction prevents evaluation leakage and overclaiming.
+The 17 traces were held out from the training and validation subsets of this corpus, but they are not an independently collected population. The repository does not currently provide a genuinely new external corpus for generalization testing.
 
-## Key Error-Analysis Result
+Therefore, the defensible claim is:
 
-One important failure was identified during evaluation:
+> V8 classified all 17 traces in the existing held-out split correctly.
 
-`trace_055`
+It is not defensible to claim 100% accuracy on future or unseen traces. A stronger evaluation requires new traces collected after the model and rules are fixed, with labels assigned independently of prediction results.
 
-The ML model predicted:
+## Re-run
 
-`none`
+From the repository root, with pandas, scikit-learn, and joblib installed:
 
-The labeled failure was:
+```bash
+python3 scripts/model/evaluate_v8.py
+```
 
-`bad_reasoning`
-
-The trace contained an explicit reasoning-error signal describing an incorrect aggregate interpretation.
-
-A deterministic reasoning-error rule was added to the V8 hybrid layer. The final V8 prediction correctly became:
-
-`bad_reasoning`
-
-This demonstrates why the project uses both statistical classification and explicit behavioral reliability rules.
-
-## Final Conclusion
-
-The V8 hybrid system successfully completed the held-out evaluation with 17/17 correct predictions.
-
-The next meaningful evaluation would require collecting genuinely new traces that were not used during development or test-set optimization.
+See [REPRODUCIBILITY.md](REPRODUCIBILITY.md) for the data and model preparation sequence.
